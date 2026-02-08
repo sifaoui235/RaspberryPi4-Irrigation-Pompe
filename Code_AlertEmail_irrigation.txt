@@ -1,0 +1,101 @@
+import sys
+import time
+import spidev
+import RPi.GPIO as GPIO
+import smtplib
+from email.mime.text import MIMEText
+from datetime import datetime
+
+# Ajout du chemin vers la bibliothèque LCD
+sys.path.append("/home/sifaoui/lcd")  # Chemin vers votre bibliothèque LCD
+import drivers
+
+# Initialisation du LCD
+display = drivers.Lcd()
+
+# Configuration GPIO
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(26, GPIO.OUT)
+GPIO.output(26, GPIO.HIGH)  # Relais OFF au démarrage
+
+# Configuration Email
+EMAIL = "sifaouisamar03@gmail.com"
+PASSWORD = "oemx bhaw lxqs rwxx"  # Mot de passe d'application
+DESTINATAIRE = "sifaouisamar03@gmail.com"
+
+class SoilMoistureSensor:
+    def __init__(self, bus=0, device=0, channel=1):
+        self.spi = spidev.SpiDev()
+        self.spi.open(bus, device)
+        self.spi.max_speed_hz = 1_350_000
+        self.channel = channel
+
+    def read_raw(self):
+        cmd = 0b11000000 | (self.channel << 3)
+        adc_data = self.spi.xfer2([cmd, 0x00, 0x00])
+        raw_value = ((adc_data[0] & 0x01) << 9) | (adc_data[1] << 1) | (adc_data[2] >> 7)
+        return raw_value
+
+    def read_percentage(self, dry_val=200, wet_val=900):
+        raw = self.read_raw()
+        moisture = max(0, min(100, (raw - dry_val) / (wet_val - dry_val) * 100))
+        return moisture
+
+    def close(self):
+        self.spi.close()
+
+def envoyer_email(sujet, etat, humidite):
+    try:
+        now = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        msg = MIMEText(
+            f"État pompe: {etat}\n"
+            f"Humidité du sol: {humidite:.1f}%\n"
+            f"Heure: {now}\n"
+            f"Action: {sujet}"
+        )
+        msg['Subject'] = f"Pompe: {sujet} (Humidité: {humidite:.1f}%)"
+        msg['From'] = EMAIL
+        msg['To'] = DESTINATAIRE
+        
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=10) as server:
+            server.login(EMAIL, PASSWORD)
+            server.send_message(msg)
+        print(f"Email envoyé: {sujet}")
+    except Exception as e:
+        print(f"Erreur envoi email: {str(e)}")
+
+if __name__ == "__main__":
+    sensor = SoilMoistureSensor(channel=1)
+    dernier_etat = None  # Pour suivre les changements d'état
+    
+    try:
+        while True:
+            moisture = sensor.read_percentage()
+            print(f"Humidité du sol: {moisture:.1f}%")
+
+            # Logique de la pompe avec relais inversé (LOW = ON)
+            if moisture < 10:
+                if dernier_etat != "ON":
+                    GPIO.output(26, GPIO.LOW)  # Activation pompe
+                    dernier_etat = "ON"
+                    print('Pompe ACTIVÉE')
+                    envoyer_email("ACTIVATION", "POMPE ACTIVÉE", moisture)
+            elif moisture > 11:
+                if dernier_etat != "OFF":
+                    GPIO.output(26, GPIO.HIGH)  # Désactivation pompe
+                    dernier_etat = "OFF"
+                    print('Pompe DÉSACTIVÉE')
+                    envoyer_email("DÉSACTIVATION", "POMPE DÉSACTIVÉE", moisture)
+
+            # Affichage LCD
+            display.lcd_display_string(f"Humidite: {moisture:.1f}%", 1)
+            display.lcd_display_string(time.strftime("%H:%M:%S"), 2)
+
+            time.sleep(1)
+
+    except KeyboardInterrupt:
+        print("\nArrêt du capteur")
+        GPIO.output(26, GPIO.HIGH)  # S'assurer que la pompe est éteinte
+        display.lcd_clear()
+        sensor.close()
+        GPIO.cleanup()
