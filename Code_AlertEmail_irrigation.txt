@@ -20,7 +20,7 @@ GPIO.output(26, GPIO.HIGH)  # Relais OFF au démarrage
 
 # Configuration Email
 EMAIL = "sifaouisamar03@gmail.com"
-PASSWORD = "oemx bhaw lxqs rwxx"  # Mot de passe d'application
+PASSWORD = "**** **** **** ****"  # Mot de passe d'application
 DESTINATAIRE = "sifaouisamar03@gmail.com"
 
 class SoilMoistureSensor:
@@ -99,3 +99,4 @@ if __name__ == "__main__":
         display.lcd_clear()
         sensor.close()
         GPIO.cleanup()
+
